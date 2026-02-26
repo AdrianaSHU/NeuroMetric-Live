@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.py[cod]
+*.[oa]
+*.so
+
+# Environments
+.venv/
+venv/
+env/
+
+# Security & Secrets
+.env
+secret.key
+certs/
+*.pem
+*.crt
+*.key
+
+# Machine Learning Models
+*.tflite
+*.pth
+
+# Data & Logs
+*.csv
+*.log
+
+# Testing
+.pytest_cache/
+.coverage
+
+# OS & Editors
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp

@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+        <h4 class="cyan m-0 fw-bold"><i class="bi bi-folder2-open me-2"></i>Decrypted Session History</h4>
+        <p class="text-muted x-small text-uppercase ls-1 mb-0">Local Secure Storage | MariaDB Vault</p>
+    </div>
+    <button onclick="downloadCSV()" class="btn btn-outline-cyan fw-bold px-4 rounded shadow-sm">
+        <i class="bi bi-file-earmark-arrow-down me-2"></i> EXPORT CSV
+    </button>
+</div>
+
+
+
+<div class="card shadow-sm p-0 border-0 overflow-hidden">
+    <div class="table-responsive">
+        <table class="table table-hover mb-0 text-center align-middle">
+            <thead>
+                <tr class="bg-light">
+                    <th class="py-3 x-small fw-bold text-muted text-uppercase ls-1 border-0">Timestamp</th>
+                    <th class="py-3 x-small fw-bold text-muted text-uppercase ls-1 border-0">Fusion Result</th>
+                    <th class="py-3 x-small fw-bold text-muted text-uppercase ls-1 border-0">EEG (Internal)</th>
+                    <th class="py-3 x-small fw-bold text-muted text-uppercase ls-1 border-0">Face (External)</th>
+                </tr>
+            </thead>
+            <tbody id="log-body" class="x-small">
+                <tr>
+                    <td colspan="4" class="text-center py-5">
+                        <div class="spinner-border spinner-border-sm text-cyan me-2" role="status"></div>
+                        <span class="text-muted fw-bold">Unlocking Encrypted Vault...</span>
+                    </td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+{% block scripts %}
+<script src="/static/js/logs.js"></script>
+{% endblock %}
+{% endblock %}

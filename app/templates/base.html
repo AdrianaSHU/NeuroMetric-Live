@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Edge AI BCI Dashboard</title>
+    
+    <script>
+        (function() {
+            const token = localStorage.getItem('bci_token');
+            const isLoginPage = window.location.pathname === '/login';
+            if (!token && !isLoginPage) {
+                window.location.href = '/login';
+            }
+        })();
+    </script>
+
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
+    <link rel="stylesheet" type="text/css" href="https://cdn.jsdelivr.net/npm/toastify-js/src/toastify.min.css">
+    
+    <link rel="stylesheet" href="/static/style.css">
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+    <script type="text/javascript" src="https://cdn.jsdelivr.net/npm/toastify-js"></script>
+    
+    {% block extra_head %}{% endblock %}
+</head>
+
+<body class="bg-light text-dark"> <div class="container py-4">
+        
+        <header class="d-flex justify-content-between align-items-center mb-4 pb-3 border-bottom border-secondary-subtle">
+            <h2 class="cyan m-0 fw-bold">NEURAL FUSION BCI</h2>
+            
+            <div class="d-flex align-items-center gap-3">
+                <nav class="d-none d-md-flex gap-2">
+                    <a href="/" class="btn btn-sm btn-outline-cyan fw-bold">DASHBOARD</a>
+                    <a href="/logs" class="btn btn-sm btn-outline-cyan fw-bold">VAULT (LOGS)</a>
+                </nav>
+                
+                <button id="logout-btn" class="btn btn-outline-danger btn-sm fw-bold">
+                    <i class="bi bi-lock-fill"></i> LOGOUT
+                </button>
+            </div>
+        </header>
+
+        <main>
+            {% block content %}{% endblock %}
+        </main>
+        
+        <footer class="text-center mt-5 pt-4 border-top border-secondary-subtle text-muted small">
+            <div class="mb-4">
+                <p class="mb-1 fw-bold text-uppercase ls-1" style="color: #6f42c1;">
+                    <i class="bi bi-award-fill me-1"></i> Project Funding & Support
+                </p>
+                <p class="mb-0">
+                    This research is proudly funded and supported by the 
+                    <span class="fw-bold text-dark">OpenBright Foundation (Women in Tech)</span>. 
+                    Empowering diversity and innovation in neural engineering.
+                </p>
+            </div>
+
+            <p class="mb-2 fw-bold text-uppercase ls-1">
+                <i class="bi bi-info-circle me-1"></i> Academic & Asset Credits
+            </p>
+            <p style="font-size: 0.75rem; line-height: 1.6;" class="mb-4">
+                Visual stimuli for biological calibration sourced under open license from <a href="https://unsplash.com" target="_blank" class="text-secondary fw-bold text-decoration-none">Unsplash</a>. 
+                <br>
+                <strong>Photography Credits:</strong> 
+                <a href="https://unsplash.com/@eddiekiszka" target="_blank" class="text-secondary text-decoration-none">Eddie Kiszka</a> | 
+                <a href="https://unsplash.com/@zitaa01" target="_blank" class="text-secondary text-decoration-none">Zita Timár</a> | 
+                <a href="https://unsplash.com/@budsilva" target="_blank" class="text-secondary text-decoration-none">Bud Silva</a> | 
+                <a href="https://unsplash.com/@globaldsioitsolution" target="_blank" class="text-secondary text-decoration-none">GLOBALDSIO</a> | 
+                <a href="https://unsplash.com/@mrlessy" target="_blank" class="text-secondary text-decoration-none">Kevin Lessy</a> | 
+                <a href="https://unsplash.com/@jaspindersingh" target="_blank" class="text-secondary text-decoration-none">Jaspinder Singh</a> | 
+                <a href="https://unsplash.com/@courtwhim" target="_blank" class="text-secondary text-decoration-none">Court</a> | 
+                <a href="https://unsplash.com/@jaimedantas" target="_blank" class="text-secondary text-decoration-none">Jaime Dantas</a> | 
+                <a href="https://unsplash.com/@sebenrique12" target="_blank" class="text-secondary text-decoration-none">Sebastian Enrique</a>
+            </p>
+
+            <div class="text-uppercase fw-bold ls-1" style="font-size: 0.70rem;">
+                Secure Edge Processing | Raspberry Pi 5 | Privacy by Design
+            </div>
+        </footer>
+    </div>
+
+    <script>
+        document.getElementById('logout-btn')?.addEventListener('click', () => {
+            localStorage.removeItem('bci_token');
+            window.location.href = '/login';
+        });
+
+        if (window.location.pathname === '/login') {
+            document.getElementById('logout-btn').style.display = 'none';
+            document.querySelector('nav').style.display = 'none';
+        }
+    </script>
+
+    {% block scripts %}{% endblock %}
+</body>
+</html>
