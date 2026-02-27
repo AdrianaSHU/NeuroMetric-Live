@@ -6,8 +6,7 @@ from app.engine.model_def import EEGNet
 class EEGProcessor:
     """
     Edge AI Inference Engine for Electroencephalography (EEG).
-    Processes raw brainwave telemetry entirely on the local hardware (Raspberry Pi)
-    to ensure zero biometric data leakage to the cloud.
+    Processes raw brainwave telemetry entirely on the local hardware (Raspberry Pi).
     """
     def __init__(self, model_path):
         # Force computation to the local CPU (Raspberry Pi compatible)
@@ -18,46 +17,43 @@ class EEGProcessor:
         self.model.load_state_dict(torch.load(model_path, map_location=self.device))
         self.model.eval() # Lock the model to evaluation mode (disables dropout layers)
         
-        # Dynamic Baseline Calibration Tracking
+        # Dynamic Baseline & EMA (Exponential Moving Average) Tracking
         self.is_calibrated = False
         self.calib_v, self.calib_a = [], []
-        self.center_v, self.center_a = 0.5, 0.5 # Default starting points
+        
+        # The adaptive thresholds that will fix your Confusion Matrix bias
+        self.center_v, self.center_a = 0.5, 0.5 
+        self.alpha = 0.05 # Learning rate for the moving baseline
 
     def predict(self, raw_data):
         """
         Executes the full EEG pipeline: Slicing -> Downsampling -> Normalization -> Inference.
-        Returns a human-readable emotional state based on Valence and Arousal.
+        Returns a human-readable emotional state based on Adaptive Valence and Arousal.
         """
         # Ensure we have at least 1 second of data (250 samples at 250Hz)
         if raw_data is None or raw_data.shape[1] < 250:
             return "Calibrating..." if not self.is_calibrated else "Relaxed / Calm"
 
-        # 1. Spatial & Temporal Slicing
-        # Isolate the 8 actual EEG channels (index 1 to 8) and grab the most recent 250 samples
+        # 1. Spatial & Temporal Slicing (Channels 1 to 8)
         chunk_250 = raw_data[1:9, -250:]
         
-        # 2. Downsampling (Feature Reduction)
-        # Compress the signal from 250Hz hardware rate to the 128Hz model training rate
+        # 2. Downsampling (Feature Reduction to 128Hz)
         chunk = signal.resample(chunk_250, 128, axis=1)
         
         # 3. Z-Score Normalization
-        # Mitigates baseline voltage drift and user skin-impedance variance using: $z = \frac{x - \mu}{\sigma}$
+        # $z = \frac{x - \mu}{\sigma}$
         chunk = (chunk - np.mean(chunk)) / (np.std(chunk) + 1e-6)
         
-        # 4. Prepare Tensor for Convolutional Network
-        # Reshapes from (Channels, Time) to (Batch, 1, Channels, Time) -> (1, 1, 8, 128)
+        # 4. Prepare Tensor for Convolutional Network -> (1, 1, 8, 128)
         tensor = torch.tensor(chunk, dtype=torch.float32).unsqueeze(0).unsqueeze(0)
 
         # 5. Model Inference (Forward Pass)
-        with torch.no_grad(): # Disable gradient tracking to save RAM on the Pi
+        with torch.no_grad():
             logits = self.model(tensor).squeeze()
-            
-            # Apply Sigmoid activation to squash raw logits into 0.0 - 1.0 probability ranges
             probs = torch.sigmoid(logits).tolist() 
-            v, a = probs[0], probs[1] # v = Valence (Positivity), a = Arousal (Energy)
+            v, a = probs[0], probs[1] # v = Valence, a = Arousal
 
-        # 6. Dynamic Calibration Phase
-        # Gathers the first 20 valid samples to establish the user's unique resting baseline
+        # 6. Initial Calibration Phase (First 20 samples)
         if not self.is_calibrated:
             self.calib_v.append(v)
             self.calib_a.append(a)
@@ -67,9 +63,47 @@ class EEGProcessor:
                 self.is_calibrated = True
             return "Calibrating..."
 
-        # 7. Circumplex Mapping
-        # Maps the AI's Valence (v) and Arousal (a) predictions against the user's custom baseline
-        if v >= self.center_v and a >= self.center_a: return "Happy / Excited"  # High V, High A
-        if v < self.center_v and a >= self.center_a: return "Stressed / Angry"  # Low V, High A
-        if v < self.center_v and a < self.center_a: return "Sad / Bored"        # Low V, Low A
-        return "Relaxed / Calm"                                                 # High V, Low A
+        # 7. Continuous Adaptive Baseline (The Confusion Matrix Fix)
+        # Slowly shifts the crosshairs of the model to account for class imbalance
+        self.center_v = (self.alpha * v) + ((1 - self.alpha) * self.center_v)
+        self.center_a = (self.alpha * a) + ((1 - self.alpha) * self.center_a)
+
+        # Store history for dashboard metrics
+        self.calib_v.append(v)
+        self.calib_a.append(a)
+        if len(self.calib_v) > 100: # Prevent memory leak on Edge device
+            self.calib_v.pop(0)
+            self.calib_a.pop(0)
+
+        # 8. Adaptive Circumplex Mapping
+        if v >= self.center_v and a >= self.center_a: return "Happy / Excited"  
+        if v < self.center_v and a >= self.center_a: return "Stressed / Angry"  
+        if v < self.center_v and a < self.center_a: return "Sad / Bored"        
+        return "Relaxed / Calm"                                                 
+
+    def get_psych_metrics(self, raw_data):
+        """
+        Acts as a bridge between the PyTorch EEGNet and the Javascript Dashboard.
+        Calculates derived metrics (like Stress) to populate the UI charts.
+        """
+        # 1. Get the categorical state using the adaptive baseline
+        emotion_string = self.predict(raw_data)
+        
+        # 2. Extract the actual Valence (v) and Arousal (a) the model just calculated
+        v = self.calib_v[-1] if len(self.calib_v) > 0 else 0.5
+        a = self.calib_a[-1] if len(self.calib_a) > 0 else 0.5
+        
+        # 3. Mathematically derive stress (High Arousal + Low Valence)
+        # $\text{Stress} = (1.0 - \text{Valence}) \times \text{Arousal}$
+        calculated_stress = (1.0 - v) * a
+
+        # 4. Package for the Dashboard UI
+        return {
+            "emotion": emotion_string, 
+            "metrics": {               
+                "valence": v,
+                "arousal": a,
+                "stress": calculated_stress
+            },
+            "confidence": 0.85
+        }

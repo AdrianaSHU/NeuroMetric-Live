@@ -187,7 +187,7 @@ document.addEventListener("DOMContentLoaded", function() {
     const verticalOffsets = [700, 500, 300, 100, -100, -300, -500, -700];
     
     let eegTraces = channelColors.map((c, i) => ({ 
-        y: Array(60).fill(verticalOffsets[i]), 
+        y: Array(250).fill(verticalOffsets[i]), 
         type: 'scatter', mode: 'lines', line: {color: c, width: 1.5}, hoverinfo: 'none'
     }));
     
@@ -229,7 +229,7 @@ document.addEventListener("DOMContentLoaded", function() {
             }
 
             // Determine active sensors based on backend data
-            const eegActive = data.eeg.raw_sample && data.eeg.raw_sample[0] !== 0;
+            const eegActive = data.eeg && data.eeg.emotion !== "OFFLINE";
             const faceActive = data.face && data.face.emotion && data.face.emotion !== "None";
 
             document.getElementById('eeg-overlay').classList.toggle('d-none', eegActive);

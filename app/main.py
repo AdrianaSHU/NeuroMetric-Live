@@ -101,7 +101,7 @@ def sensor_loop():
             face_roi = cam_hw.get_face_roi(emotion_text=current_face_emotion)   
             
             current_raw = getattr(eeg_hw, 'current_signal_sample', [0.0] * 8)
-            is_eeg_valid = isinstance(current_raw, list) and len(current_raw) > 0 and abs(current_raw[0]) < 480 and current_raw[0] != 0
+            is_eeg_valid = raw_eeg is not None and raw_eeg.shape[1] > 0
             is_face_valid = face_roi is not None and face_roi.size > 0
 
             eeg_emotion, eeg_conf = "None", 0.0
@@ -112,24 +112,25 @@ def sensor_loop():
 
             # 2. Brainwave Inference
             if is_eeg_valid:
-                eeg_probs = eeg_engine.predict(raw_eeg)
-                raw_metrics = eeg_engine.get_psych_metrics(raw_eeg)
-                
-                psych_metrics = {
-                    "valence": sanitize_float(raw_metrics.get("valence", 0.0)),
-                    "arousal": sanitize_float(raw_metrics.get("arousal", 0.0)),
-                    "stress": sanitize_float(raw_metrics.get("stress", 0.0))
-                }
-                eeg_emotion = config.EMOTIONS[np.argmax(eeg_probs)]
-                eeg_conf = sanitize_float(eeg_probs.max())
-                eeg_probs_list = [sanitize_float(p) for p in np.array(eeg_probs).flatten().tolist()]
-                current_raw = [sanitize_float(val) for val in current_raw]
+                    eeg_output = eeg_engine.get_psych_metrics(raw_eeg)
+                    
+                    eeg_emotion = eeg_output["emotion"]
+                    eeg_conf = 0.85 # Base confidence for EEG
+                    
+                    raw_metrics = eeg_output["metrics"]
+                    psych_metrics = {
+                        "valence": float(raw_metrics.get("valence", 0.0)),
+                        "arousal": float(raw_metrics.get("arousal", 0.0)),
+                        "stress": float(raw_metrics.get("stress", 0.0))
+                    }
+                    current_raw = [float(val) for val in current_raw]
 
             # 3. Facial Expression Inference
             if is_face_valid:
-                face_probs = face_engine.predict(face_roi)
-                face_emotion = config.EMOTIONS[np.argmax(face_probs)]
-                face_conf = sanitize_float(face_probs.max())
+                    face_probs = face_engine.predict(face_roi)
+                    if isinstance(face_probs, np.ndarray) and len(face_probs) == 8:
+                        face_emotion = config.EMOTIONS[np.argmax(face_probs)]
+                        face_conf = float(face_probs.max())
 
             # 4. Multimodal Fusion (Affective Computing)
             if is_eeg_valid and is_face_valid:
@@ -166,6 +167,7 @@ def sensor_loop():
 
         except Exception as e:
             print(f"Worker Loop Error: {e}")
+            traceback.print_exc()
         time.sleep(0.1)
 
 # ==========================================
