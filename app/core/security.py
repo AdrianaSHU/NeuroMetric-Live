@@ -13,9 +13,7 @@ import pyotp
 # Load environment variables (keeps secrets out of the source code)
 load_dotenv()
 
-# ==========================================
-# 1. DATA ENCRYPTION (Data at Rest)
-# ==========================================
+# DATA ENCRYPTION (Data at Rest)
 
 # Define the absolute path for the symmetric encryption key
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
@@ -38,7 +36,7 @@ def load_key():
             key = key_file.read()
     return key
 
-# Initialize the AES cipher suite
+# Initialise the AES cipher suite
 cipher_suite = Fernet(load_key())
 
 def encrypt_payload(eeg_data: dict, face_data: dict, fusion_result: str):
@@ -69,10 +67,7 @@ def decrypt_payload(encrypted_text: str):
         return {"error": "Failed to decrypt"}
 
 
-
-# ==========================================
-# 2. AUTHENTICATION & ACCESS CONTROL
-# ==========================================
+# AUTHENTICATION & ACCESS CONTROL
 
 JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "fallback_generate_a_random_long_string")
 ALGORITHM = "HS256"
@@ -136,9 +131,7 @@ def get_current_admin(token: str = Depends(oauth2_scheme)):
         
     return token_data
 
-# ==========================================
-# 3. MULTI-FACTOR AUTHENTICATION (MFA)
-# ==========================================
+# MULTI-FACTOR AUTHENTICATION (MFA)
 
 def get_totp_secret():
     """Retrieves the Time-Based One-Time Password secret from the environment."""

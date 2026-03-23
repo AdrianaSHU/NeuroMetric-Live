@@ -6,14 +6,18 @@ import math
 import numpy as np
 import cv2
 import uvicorn
+import glob
+import csv
+import shutil
 from datetime import datetime, timedelta
-from fastapi import FastAPI, Request, Depends, HTTPException, status
+from fastapi import FastAPI, Request, Depends, HTTPException, status, Query
 from fastapi.responses import HTMLResponse, StreamingResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from contextlib import asynccontextmanager
+from jose import jwt, JWTError
 
-# Internal Professional Modules
+# Internal Modules
 from app.core import database, security, schemas, config
 from app.sensors.eeg import EEGSensor
 from app.sensors.camera import CameraSensor
@@ -21,17 +25,17 @@ from app.engine.eeg_processor import EEGProcessor
 from app.engine.face_processor import FaceProcessor
 from app.engine.fusion import compute_multimodal_fusion
 
-# ==========================================
 # GLOBAL HARDWARE & AI INSTANCES
-# ==========================================
+
 eeg_hw = EEGSensor(serial_port=config.EEG_PORT)
 cam_hw = CameraSensor()
-eeg_engine = EEGProcessor(model_path=config.EEG_MODEL_PATH)
+_isnan = math.isnan
+_isinf = math.isinf
+
+eeg_engine = EEGProcessor(model_path=config.EEG_MODEL_PATH, require_calibration=True)
 face_engine = FaceProcessor(model_path=config.FACE_MODEL_PATH)
 
 # Real-time state (Zero-Trust Data Source)
-# Acts as a volatile memory buffer so the frontend can pull live data 
-# without constantly reading/writing to the database.
 latest_data = {
     "session": {"subject_id": "STANDBY", "nickname": ""},
     "eeg": {
@@ -39,16 +43,19 @@ latest_data = {
         "conf": 0.0, 
         "metrics": {"valence": 0.0, "arousal": 0.0, "stress": 0.0},
         "raw_sample": [0.0] * 8, 
-        "probs": [0.0] * 8  
+        "probs": [0.0] * 4 
     },
     "face": {"emotion": "None", "conf": 0.0},
-    "fusion": {"emotion": "STANDBY", "match": True}
+    "fusion": {"emotion": "STANDBY", "match": True, "is_fake": False} 
 }
 
 session_logs = []
 user_profile = None
 
-# Load cached user profile to personalize baseline calibration
+# Global Label starts as clean text
+last_label = "NEUTRAL"
+active_csv_filename = None
+
 if os.path.exists("user_profile.json"):
     try:
         with open("user_profile.json", "r") as f:
@@ -56,13 +63,11 @@ if os.path.exists("user_profile.json"):
     except: pass
 
 def sanitize_float(val):
-    """Prevents JSON serialization crashes caused by NaN or Infinity values."""
     if val is None: return 0.0
     try:
-        if math.isnan(val) or math.isinf(val): return 0.0
+        if _isnan(val) or _isinf(val): return 0.0
         return float(val)
-    except:
-        return 0.0
+    except: return 0.0
 
 def gen_face_stream():
     """Yields continuous MJPEG frames securely to the authenticated dashboard."""
@@ -72,124 +77,146 @@ def gen_face_stream():
             _, buffer = cv2.imencode('.jpg', frame)
             yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + buffer.tobytes() + b'\r\n')
         else:
-            # Fallback UI if the camera drops connection
             placeholder = np.zeros((220, 320, 3), dtype=np.uint8)
             cv2.putText(placeholder, "WAITING...", (80, 110), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (198, 218, 3), 2)
             _, buffer = cv2.imencode('.jpg', placeholder)
             yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + buffer.tobytes() + b'\r\n')
-        time.sleep(0.05)
-
+        time.sleep(0.03)
 
 
 def sensor_loop():
-    """
-    Background Daemon Thread.
-    Continuously polls the physical sensors, runs Edge AI inference, 
-    and updates the 'latest_data' global state at roughly 10Hz.
-    """
-    global latest_data, session_logs
+    global latest_data, session_logs, last_label, active_csv_filename
     eeg_hw.start()
     cam_hw.start()
     
+    time.sleep(1.0) 
+    _round = round
+
+    os.makedirs("logs", exist_ok=True)
+    last_log_time = 0.0
+    
     while True:
         try:
-            # 1. Hardware Polling
+            # Hardware Polling
             raw_eeg = eeg_hw.get_raw_data(250) 
             
-            # UX FIX: Feed the last known emotion back to the camera to draw on the video UI!
-            current_face_emotion = latest_data["face"]["emotion"]
-            face_roi = cam_hw.get_face_roi(emotion_text=current_face_emotion)   
+            # Request facial data (Eye Aspect Ratio is calculated but no longer used for status)
+            face_roi, ear_score = cam_hw.get_processed_data(emotion_text=last_label) 
             
-            current_raw = getattr(eeg_hw, 'current_signal_sample', [0.0] * 8)
             is_eeg_valid = raw_eeg is not None and raw_eeg.shape[1] > 0
             is_face_valid = face_roi is not None and face_roi.size > 0
 
             eeg_emotion, eeg_conf = "None", 0.0
-            face_emotion, face_conf = "None", 0.0
+            face_emotion, face_conf_val = "None", 0.0
+            face_probs = np.zeros(8)
             psych_metrics = {"valence": 0.0, "arousal": 0.0, "stress": 0.0}
-            eeg_probs_list = [0.0] * 7
-            eeg_probs, face_probs = None, None
 
-            # 2. Brainwave Inference
+            # Brainwave Inference
             if is_eeg_valid:
-                    eeg_output = eeg_engine.get_psych_metrics(raw_eeg)
-                    
-                    eeg_emotion = eeg_output["emotion"]
-                    eeg_conf = 0.85 # Base confidence for EEG
-                    
-                    raw_metrics = eeg_output["metrics"]
-                    psych_metrics = {
-                        "valence": float(raw_metrics.get("valence", 0.0)),
-                        "arousal": float(raw_metrics.get("arousal", 0.0)),
-                        "stress": float(raw_metrics.get("stress", 0.0))
-                    }
-                    current_raw = [float(val) for val in current_raw]
+                eeg_emotion, eeg_probs_list = eeg_engine.predict(raw_eeg)
+                eeg_conf = 0.85 
+                psych_metrics = eeg_engine.get_psych_metrics()
 
-            # 3. Facial Expression Inference
+            # Facial Expression Inference
             if is_face_valid:
-                    face_probs = face_engine.predict(face_roi)
-                    if isinstance(face_probs, np.ndarray) and len(face_probs) == 8:
-                        face_emotion = config.EMOTIONS[np.argmax(face_probs)]
-                        face_conf = float(face_probs.max())
+                face_probs = face_engine.predict(face_roi)
+                face_idx = np.argmax(face_probs)
+                
+                # Fetch raw float for frontend JavaScript
+                face_conf_val = sanitize_float(face_probs[face_idx])
+                face_emotion = config.EMOTIONS[face_idx].upper()
+                
+                # Update visual label for the green box on next frame
+                last_label = face_emotion
 
-            # 4. Multimodal Fusion (Affective Computing)
+            # Multimodal Fusion
             if is_eeg_valid and is_face_valid:
-                fusion_result = compute_multimodal_fusion(eeg_probs, face_probs, config.EMOTIONS, user_profile)
-                if "confidence" in fusion_result:
-                    fusion_result["confidence"] = sanitize_float(fusion_result["confidence"])
+                # This function now handles the "Synced" vs "Dissonance" status strings
+                fusion_result = compute_multimodal_fusion(eeg_emotion, face_probs, config.EMOTIONS, user_profile)
             else:
-                fusion_result = {"emotion": "STANDBY", "match": True}
+                fusion_result = {"emotion": "STANDBY", "status": "WAITING", "is_fake": False, "confidence": 0.0}
 
-            # 5. Update Global State
+            # Update Global State 
             latest_data.update({
                 "eeg": {
-                    "emotion": eeg_emotion, "conf": eeg_conf, 
+                    "emotion": eeg_emotion, 
+                    "conf": sanitize_float(eeg_conf), 
                     "metrics": psych_metrics, 
-                    "raw_sample": current_raw if is_eeg_valid else [0.0]*8, 
-                    "probs": eeg_probs_list
+                    "raw_sample": getattr(eeg_hw, 'current_signal_sample', [0.0]*8), 
+                    "probs": [sanitize_float(p) for p in eeg_probs_list] if is_eeg_valid else [0.0]*4
                 },
-                "face": {"emotion": face_emotion, "conf": face_conf},
+                "face": {
+                    "emotion": face_emotion, 
+                    "conf": face_conf_val,
+                    "ear": _round(ear_score, 2)
+                },
                 "fusion": fusion_result
             })
 
-            # 6. Session Logging (Sampled every 2 seconds to prevent memory overflow)
-            if int(time.time()) % 2 == 0 and is_eeg_valid and is_face_valid:
+            # --- 6. APPEND-ON-THE-FLY CSV LOGGING ---
+            current_time = time.time()
+            
+            # Check if exactly 2.0 seconds have passed since the last save
+            if active_csv_filename and (current_time - last_log_time >= 2.0) and is_eeg_valid and is_face_valid:
+                
+                # Reset the timer immediately
+                last_log_time = current_time 
+                
+                conf_val = fusion_result.get("confidence", 0.0)
+
+                # Auto-save straight to the PC disk
+                with open(active_csv_filename, mode='a', newline='') as f:
+                    writer = csv.writer(f)
+                    writer.writerow([
+                        datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        fusion_result["emotion"],
+                        fusion_result["status"],
+                        f"{conf_val:.2%}", 
+                        eeg_emotion,
+                        face_emotion,
+                        f"{psych_metrics.get('valence', 0.0):.2f}",
+                        f"{psych_metrics.get('arousal', 0.0):.2f}",
+                        f"{psych_metrics.get('stress', 0.0):.2f}"
+                    ])
+
+                # Keep the UI "Review" screen updated
                 log_entry = {
-                    "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "time": datetime.now().strftime("%H:%M:%S"),
                     "fusion": fusion_result["emotion"],
+                    "status": fusion_result["status"],
+                    "confidence": conf_val,
                     "details": {"eeg": {"emotion": eeg_emotion}, "face": {"emotion": face_emotion}},
                     "metrics": psych_metrics
                 }
                 
-                if not session_logs or session_logs[0]["time"] != log_entry["time"]:
-                    session_logs.insert(0, log_entry)
-                    if len(session_logs) > 100: session_logs.pop() # Keep buffer small on the edge
+                session_logs.insert(0, log_entry)
+                if len(session_logs) > 500: session_logs.pop()
 
         except Exception as e:
             print(f"Worker Loop Error: {e}")
-            traceback.print_exc()
-        time.sleep(0.1)
+        time.sleep(0.03)
 
-# ==========================================
 # FASTAPI SERVER SETUP
-# ==========================================
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Startup and Shutdown lifecycle manager."""
-    database.init_db() # Ensure the Vault is built
-    t = threading.Thread(target=sensor_loop, daemon=True) # Start background AI
+    try:
+        eeg_hw.stop()
+        cam_hw.stop()
+        time.sleep(0.5) 
+    except: pass
+    
+    database.init_db() 
+    t = threading.Thread(target=sensor_loop, daemon=True) 
     t.start()
     yield
-    eeg_hw.stop() # Safely release hardware ports on shutdown
+    eeg_hw.stop() 
     cam_hw.stop()
 
 app = FastAPI(lifespan=lifespan)
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 templates = Jinja2Templates(directory="app/templates")
 
-# ==========================================
-# HTML FRONTEND ROUTES
-# ==========================================
 @app.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request):
     return templates.TemplateResponse("login.html", {"request": request})
@@ -201,12 +228,6 @@ async def dashboard(request: Request):
 @app.get("/logs", response_class=HTMLResponse)
 async def view_logs(request: Request):
     return templates.TemplateResponse("logs.html", {"request": request})
-
-# ==========================================
-# SECURE ADMIN & API ROUTES (Zero-Trust Gatekeepers)
-# ==========================================
-
-
 
 @app.post("/api/admin/create-subject")
 async def api_create_subject(nickname: str, age: int, sex: str, admin: dict = Depends(security.get_current_admin)):
@@ -220,16 +241,48 @@ async def api_create_subject(nickname: str, age: int, sex: str, admin: dict = De
 async def list_subjects(admin: dict = Depends(security.get_current_admin)):
     conn = database.get_db_connection()
     cursor = conn.cursor(dictionary=True)
-    cursor.execute("SELECT username, nickname, age, sex FROM users WHERE role='subject' ORDER BY id DESC")
+    query = """
+        SELECT u.username, u.nickname, u.age, u.sex,
+               (CASE WHEN e.alpha_baseline > 0 AND f.neutral > 0 THEN 1 ELSE 0 END) AS is_calibrated
+        FROM users u 
+        LEFT JOIN eeg_calibration e ON u.id = e.user_id 
+        LEFT JOIN face_calibration f ON u.id = f.user_id
+        WHERE u.role='subject' 
+        ORDER BY u.id DESC
+    """
+    cursor.execute(query)
     res = cursor.fetchall()
     cursor.close(); conn.close()
     return res
 
 @app.post("/api/admin/set-active-subject/{sid}")
 async def set_active(sid: str, admin: dict = Depends(security.get_current_admin)):
-    global latest_data
+    global latest_data, session_logs, active_csv_filename
+    
+    # Update active subject
     latest_data["session"]["subject_id"] = sid
-    return {"status": "ok", "active_id": sid}
+    
+    # Clear the Live UI Review screen
+    session_logs.clear()
+    
+    # Remove the old session files for this specific subject
+    os.makedirs("logs", exist_ok=True)
+    old_files = glob.glob(f"logs/BCI_Session_{sid}_*.csv")
+    for f in old_files:
+        try:
+            os.remove(f)
+        except Exception as e:
+            print(f"Failed to delete old log: {e}")
+
+    # Create a fresh file for the new session and write the headers
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    active_csv_filename = f"logs/BCI_Session_{sid}_{timestamp}.csv"
+    
+    with open(active_csv_filename, mode='w', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow(["Timestamp", "Fusion Result", "Status", "Confidence", "EEG (Neural)", "Face (Optical)", "Valence", "Arousal", "Stress"])
+
+    return {"status": "ok", "active_id": sid, "message": "Old logs cleared. New auto-save session started."}
 
 @app.delete("/api/admin/subjects/{sid}")
 async def delete_subject(sid: str, admin: dict = Depends(security.get_current_admin)):
@@ -246,20 +299,15 @@ async def delete_subject(sid: str, admin: dict = Depends(security.get_current_ad
     cursor.execute("DELETE FROM users WHERE username = %s AND role = 'subject'", (sid,))
     conn.commit()
     cursor.close(); conn.close()
-    return {"status": "success", "message": f"Subject {sid} deleted"}
+    return {"status": "success"}
 
 @app.post("/api/calibrate-done")
 async def save_calibration(data: schemas.CalibrationResult, admin: dict = Depends(security.get_current_admin)):
-    """
-    Zero-Trust Endpoint: Pulls current sensor data directly from hardware memory
-    rather than trusting potentially manipulated data from the browser.
-    """
     conn = database.get_db_connection()
     if not conn:
         raise HTTPException(status_code=500, detail="Database connection failed")
         
     cursor = conn.cursor(dictionary=True)
-    
     try:
         cursor.execute("SELECT id FROM users WHERE username = %s", (data.subject_id,))
         user = cursor.fetchone()
@@ -269,37 +317,39 @@ async def save_calibration(data: schemas.CalibrationResult, admin: dict = Depend
         u_id = user['id']
         global latest_data
         
-        # Extract live hardware metrics natively on the server
+        eeg_engine.is_calibrated = True
         eeg_m = latest_data.get("eeg", {}).get("metrics", {})
-        live_arousal = eeg_m.get("arousal", 0.0)
         live_stress = eeg_m.get("stress", 0.0)
         
-        face_conf = latest_data.get("face", {}).get("conf", 0.0)
+        raw_conf = latest_data.get("face", {}).get("conf", 0.0)
+        face_conf = float(raw_conf)
+        
         face_emotion = latest_data.get("face", {}).get("emotion", "None")
         neutral_baseline = face_conf if face_emotion.lower() == "neutral" else 0.5
         
-        # Populate Mathematical Baseline Vaults
         cursor.execute("""
             INSERT INTO eeg_calibration (user_id, alpha_baseline, beta_baseline, theta_baseline, gamma_baseline, noise_floor)
-            VALUES (%s, %s, %s, %s, %s, %s)
+            VALUES (%s, 1.0, 0.0, 0.0, 0.0, %s)
             ON DUPLICATE KEY UPDATE 
                 alpha_baseline=VALUES(alpha_baseline), 
                 noise_floor=VALUES(noise_floor)
-        """, (u_id, live_arousal, 0.0, 0.0, 0.0, live_stress))
+        """, (u_id, live_stress))
 
         cursor.execute("""
-            INSERT INTO face_calibration (user_id, anger, contempt, disgust, fear, happy, neutral, sad, surprise)
-            VALUES (%s, 0.0, 0.0, 0.0, 0.0, 0.0, %s, 0.0, 0.0)
+            INSERT INTO face_calibration (user_id, neutral, happy, sad) 
+            VALUES (%s, %s, %s, %s)
             ON DUPLICATE KEY UPDATE 
-                neutral=VALUES(neutral)
-        """, (u_id, neutral_baseline))
+                neutral = VALUES(neutral), 
+                happy = VALUES(happy), 
+                sad = VALUES(sad);
+        """, (u_id, neutral_baseline, 0.0, 0.0))
 
         if data.apply_update:
             new_bias_note = f"Adaptive ML Update: +{data.learning_rate} applied on {datetime.now().strftime('%Y-%m-%d %H:%M')}"
             cursor.execute("UPDATE users SET learned_bias = %s WHERE id = %s", (new_bias_note, u_id))
 
         conn.commit()
-        return {"status": "success", "message": f"Baselines saved for {data.subject_id}"}
+        return {"status": "success", "message": f"Z-Score Baselines locked for {data.subject_id}"}
 
     except Exception as e:
         conn.rollback()
@@ -308,18 +358,20 @@ async def save_calibration(data: schemas.CalibrationResult, admin: dict = Depend
     finally:
         cursor.close()
         conn.close()
-        
+
 @app.get("/api/calibration-images")
 async def api_get_calibration_images(admin: dict = Depends(security.get_current_admin)):
     try:
-        image_pool = database.get_calibration_images_from_db()
-        if not image_pool: raise ValueError("Empty pool")
+        image_pool = database.get_local_calibration_images()
+        if not image_pool or (not image_pool["focus"] and not image_pool["neutral"]): 
+            raise ValueError("No images found in local directory")
         return image_pool
-    except:
+    except Exception as e:
+        print(f"Error loading images: {e}")
         return {
-            "focus": ["/static/focus1.jpg"],
-            "neutral": ["/static/neutral1.jpg"],
-            "relax": ["/static/relax1.jpg"]
+            "focus": ["/static/img/calibration/focus-dewdrop.jpg"],
+            "neutral": ["/static/img/calibration/neutral-curtains.jpg"],
+            "relax": ["/static/img/calibration/relax-sunset.jpg"]
         }
 
 @app.post("/api/login", response_model=schemas.Token)
@@ -332,19 +384,15 @@ def login_admin(request: schemas.LoginRequest):
     user = cursor.fetchone()
     cursor.close(); conn.close()
 
-    # 1. Check Passwords Securely (Bcrypt)
     if not user or not security.verify_password(request.password, user["hashed_password"]):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Incorrect credentials")
     
-    # 2. Check Strict Role
     if user["role"] != "superuser":
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admins only.")
 
-    # 3. Check Multi-Factor Authentication
     if not security.verify_mfa_code(request.mfa_code):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid MFA")
 
-    # 4. Issue Cryptographic JSON Web Token
     expires_delta = timedelta(days=7) if request.remember_me else timedelta(hours=2)
     access_token = security.create_access_token(
         data={"sub": user["username"], "role": user["role"]},
@@ -361,33 +409,54 @@ async def get_history(admin: dict = Depends(security.get_current_admin)):
     return session_logs
 
 @app.get("/face_stream")
-async def face_stream():
-    # Note: No 'Depends' here because HTML <img> tags cannot send Bearer Tokens easily. 
-    # Protected implicitly via front-end routing if desired, or left accessible locally.
+async def face_stream(token: str = Query(None)):
+    if not token:
+        raise HTTPException(status_code=401, detail="Stream unauthorized")
+    try:
+        payload = jwt.decode(token, security.JWT_SECRET_KEY, algorithms=[security.ALGORITHM])
+        if payload.get("role") != "superuser":
+            raise HTTPException(status_code=403, detail="Insufficient permissions")
+    except JWTError:
+        raise HTTPException(status_code=401, detail="Invalid stream token")
+
     return StreamingResponse(gen_face_stream(), media_type="multipart/x-mixed-replace; boundary=frame")
 
 @app.get("/api/export")
 async def export_csv(admin: dict = Depends(security.get_current_admin)):
-    import csv, io
-    stream = io.StringIO()
-    writer = csv.writer(stream)
-    writer.writerow(["Timestamp", "Fusion Result", "EEG Emotion", "Face Emotion", "Valence", "Arousal", "Stress"])
+    global active_csv_filename, latest_data
     
-    for row in session_logs:
-        writer.writerow([
-            row["time"], row["fusion"], 
-            row["details"]["eeg"]["emotion"], row["details"]["face"]["emotion"],
-            f"{row['metrics']['valence']:.2f}", 
-            f"{row['metrics']['arousal']:.2f}", 
-            f"{row['metrics']['stress']:.2f}"
-        ])
+    current_sid = latest_data["session"]["subject_id"]
+    
+    # Ensure a subject is actually selected
+    if current_sid == "STANDBY":
+        raise HTTPException(status_code=400, detail="No active subject selected.")
         
-    response = Response(content=stream.getvalue(), media_type="text/csv")
-    response.headers["Content-Disposition"] = f"attachment; filename=bci_session_{int(time.time())}.csv"
+    target_file = None
+    
+    # Is there a session currently running?
+    if active_csv_filename and os.path.exists(active_csv_filename):
+        target_file = active_csv_filename
+    # If the session was stopped, find the timestamped file left in the folder
+    else:
+        list_of_files = glob.glob(f"logs/BCI_Session_{current_sid}_*.csv")
+        if list_of_files:
+            # Grab the one file that exists for this subject
+            target_file = max(list_of_files, key=os.path.getctime)
+            
+    # Check if a file was successfully found
+    if not target_file:
+        raise HTTPException(status_code=404, detail=f"No session data found for subject {current_sid}.")
+        
+    # Read the physical file from the hard drive
+    with open(target_file, mode="rb") as f:
+        content = f.read()
+        
+    # Send it securely to the JavaScript download function
+    response = Response(content=content, media_type="text/csv")
+    response.headers["Content-Disposition"] = f"attachment; filename={os.path.basename(target_file)}"
     return response
 
 if __name__ == "__main__":
-    # Force HTTPS explicitly with loaded certs to secure data in transit 
     uvicorn.run(app, host="0.0.0.0", port=8000, 
                 ssl_keyfile="certs/key.pem", 
                 ssl_certfile="certs/cert.pem", 

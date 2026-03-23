@@ -1,19 +1,11 @@
-/**
- * Secure Vault Manager.
- * Handles the retrieval of live session logs and strictly authenticated CSV exports.
- */
-
-// --- Secure Vault Updating ---
+// Secure Vault Updating 
 function updateVault() {
     const token = localStorage.getItem('bci_token');
-
-    // 1. Client-Side Gatekeeper: Redirect to login if the badge is missing
     if (!token) {
         window.location.href = '/login';
         return;
     }
 
-    // 2. Fetch with Cryptographic Authorisation headers
     fetch('/api/history', {
         method: 'GET',
         headers: {
@@ -22,11 +14,10 @@ function updateVault() {
         }
     })
     .then(res => {
-        // 3. Handle expired or forged tokens
         if (res.status === 401 || res.status === 403) {
             localStorage.removeItem('bci_token');
             window.location.href = '/login';
-            throw new Error("Session expired. Please log in again."); // Fixed Promise chain bug
+            throw new Error("Session expired."); 
         }
         return res.json();
     })
@@ -35,35 +26,71 @@ function updateVault() {
         if (!tbody) return; 
         
         if (!data || data.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="4" class="text-center py-4 text-muted">No logs recorded yet. Waiting for active sensors...</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="4" class="text-center py-4 text-muted">Awaiting stabilized sensor data...</td></tr>';
             return;
         }
         
-        // 4. Optimised DOM Injection
         let newHtml = '';
         data.forEach(row => {
+            let statusBadge = '';
+            const currentStatus = row.status || 'Unknown'; 
+            const currentEmotion = row.fusion || 'None';
+            
+            // Calculate confidence percentage for the UI meter
+            const confPercent = Math.round((row.confidence || 0) * 100);
+
+            // REFINED STATUS LOGIC 
+            if (currentStatus === 'Synced' || currentStatus === 'STABLE') {
+                statusBadge = '<span class="badge bg-success text-white px-3 py-2 rounded-pill shadow-sm"><i class="bi bi-shield-check me-1"></i> SYNCED</span>';
+            } 
+            else if (currentStatus === 'Dissonance' || currentEmotion.includes('MASKED')) {
+                statusBadge = '<span class="badge bg-danger text-white px-3 py-2 rounded-pill shadow-sm"><i class="bi bi-eye-slash me-1"></i> DISSONANCE</span>';
+            } 
+            else {
+                statusBadge = `<span class="badge bg-warning text-dark px-3 py-2 rounded-pill shadow-sm">${currentStatus.toUpperCase()}</span>`;
+            }
+
+            // Professional UI formatting
+            const eegEmo = row.details.eeg.emotion.replace('...', '');
+            const faceEmo = row.details.face.emotion;
+
+            // Confidence Meter HTML component
+            const confidenceMeter = `
+                <div class="mt-2" style="max-width: 100px;">
+                    <div class="progress" style="height: 4px; background-color: rgba(0,0,0,0.05);">
+                        <div class="progress-bar ${confPercent > 70 ? 'bg-info' : 'bg-secondary'}" 
+                             role="progressbar" style="width: ${confPercent}%"></div>
+                    </div>
+                    <div style="font-size: 0.6rem;" class="text-muted fw-bold mt-1">${confPercent}% CERTAINTY</div>
+                </div>
+            `;
+
             newHtml += `
                 <tr>
-                    <td class="text-secondary small">${row.time}</td>
-                    <td class="purple fw-bold">${row.fusion}</td>
-                    <td>${row.details.eeg.emotion}</td>
-                    <td>${row.details.face.emotion}</td>
+                    <td class="text-secondary small align-middle" style="font-family: 'Courier New', monospace;">${row.time}</td>
+                    <td class="align-middle">
+                        ${statusBadge}
+                        <div class="mt-2 small fw-bold text-dark text-uppercase ls-1">${row.fusion}</div>
+                        ${confidenceMeter}
+                    </td>
+                    <td class="align-middle">
+                         <span class="badge bg-light text-dark border px-2 py-1">${eegEmo}</span>
+                         <div class="text-muted mt-1" style="font-size: 0.65rem; font-weight: 600;">NEURAL TRUTH</div>
+                    </td>
+                    <td class="align-middle">
+                         <span class="badge bg-light text-dark border px-2 py-1">${faceEmo}</span>
+                         <div class="text-muted mt-1" style="font-size: 0.65rem; font-weight: 600;">OPTICAL MASK</div>
+                    </td>
                 </tr>
             `;
         });
         
         tbody.innerHTML = newHtml;
     })
-    .catch(err => {
-        console.error("Vault fetch error:", err);
-        const tbody = document.getElementById('log-body');
-        if (tbody && err.message !== "Session expired. Please log in again.") {
-            tbody.innerHTML = '<tr><td colspan="4" class="text-center py-4 text-danger">Encryption Error: Unable to reach secure vault.</td></tr>';
-        }
-    });
+    .catch(err => console.error("Vault fetch error:", err));
 }
 
-// --- Secure CSV Export ---
+// Secure CSV Export 
 async function downloadCSV() {
     const token = localStorage.getItem('bci_token');
     if (!token) {
@@ -79,7 +106,6 @@ async function downloadCSV() {
             style: { background: "#17a2b8" }
         }).showToast();
 
-        // Fetch the file securely using the JWT token
         const response = await fetch('/api/export', {
             method: 'GET',
             headers: {
@@ -91,18 +117,15 @@ async function downloadCSV() {
             throw new Error("Unauthorized or server error");
         }
 
-        // Convert the secure binary response into a downloadable Blob in browser memory
         const blob = await response.blob();
         const url = window.URL.createObjectURL(blob);
         
-        // Create a temporary hidden link to force the browser download
         const a = document.createElement('a');
         a.href = url;
         a.download = `bci_session_${Math.floor(Date.now() / 1000)}.csv`;
         document.body.appendChild(a);
         a.click();
         
-        // Cleanup volatile memory
         a.remove();
         window.URL.revokeObjectURL(url);
 
@@ -116,11 +139,8 @@ async function downloadCSV() {
     }
 }
 
-// --- Initialization ---
+// Initialization 
 document.addEventListener("DOMContentLoaded", function() {
-    updateVault(); // Run once immediately on page load
-    
-    // Auto-refresh the Vault every 2 seconds. 
-    // This slow polling rate saves the Raspberry Pi's CPU from being overloaded.
+    updateVault(); 
     setInterval(updateVault, 2000);
 });

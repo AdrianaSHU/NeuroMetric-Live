@@ -11,7 +11,7 @@ def main():
     print("   NEURAL FUSION BCI: SECURE ADMIN SETUP   ")
     print("="*45)
 
-    # 1. Collect User Credentials
+    # Collect User Credentials
     username = input("\n[1/3] Enter New Admin Username: ").strip()
     if not username:
         print("!! Error: Username cannot be empty.")
@@ -24,7 +24,7 @@ def main():
         print("!! Error: Passwords do not match.")
         return
 
-    # 2. Handle MFA Secret (Check .env first, otherwise generate)
+    # Handle MFA Secret (Check .env first, otherwise generate)
     print("\n[3/3] Configuring Multi-Factor Authentication...")
     mfa_secret = os.getenv("ADMIN_TOTP_SECRET")
 
@@ -35,7 +35,7 @@ def main():
     else:
         print("  > Using existing ADMIN_TOTP_SECRET from .env")
 
-    # 3. Generate the QR Code for the phone
+    # Generate the QR Code for the phone
     totp = pyotp.TOTP(mfa_secret)
     provisioning_uri = totp.provisioning_uri(name=username, issuer_name="NeuralFusion_BCI")
     
@@ -43,7 +43,7 @@ def main():
     qr_img = qrcode.make(provisioning_uri)
     qr_img.save(qr_filename)
 
-    # 4. Save User to MariaDB
+    # Save User to MariaDB
     hashed_pw = security.get_password_hash(password)
     conn = database.get_db_connection()
     if not conn:

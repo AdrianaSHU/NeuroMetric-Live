@@ -1,84 +1,50 @@
 import numpy as np
 
-# --- SENSOR WEIGHTS & RELIABILITY METRICS ---
-# Privacy by Design: These weights allow the system to dynamically distrust 
-# the camera (which can be spoofed) in favor of the EEG (which cannot).
-CAMERA_RELIABILITY = {
-    "anger": 0.39, "contempt": 0.25, "disgust": 0.14, "fear": 0.41,
-    "happy": 0.71, "neutral": 0.75, "sad": 0.33, "surprise": 0.42
+# Neutral is now accepted as a baseline for all states
+EMOTION_MAP = {
+    "HAPPY": ["HAPPY", "SURPRISE", "NEUTRAL"], 
+    "FEAR":  ["FEAR", "ANGER", "SURPRISE"],
+    "SAD":   ["SAD", "DISGUST", "CONTEMPT", "NEUTRAL"],
+    "NEUTRAL": ["NEUTRAL", "CONTEMPT"]
 }
-
-# Circumplex Mapping: Translates specific facial classifications into 
-# broader psychological quadrants to match the EEG output.
-FACE_TO_QUADRANT = {
-    "happy": "Happy / Excited", "surprise": "Happy / Excited",
-    "anger": "Stressed / Angry", "fear": "Stressed / Angry", "contempt": "Stressed / Angry",
-    "sad": "Sad / Bored", "disgust": "Sad / Bored",
-    "neutral": "Relaxed / Calm"
-}
-
-
 
 def compute_multimodal_fusion(eeg_input, face_probs, emotions_list, user_profile=None):
-    """
-    Executes a 'Late Fusion' multimodal algorithm.
-    Compares neurological intent (EEG) with physiological expression (Face)
-    to detect emotional dissonance (e.g., faking a smile).
-    """
-    # Fallback if camera loses tracking
-    if face_probs is None or np.sum(face_probs) == 0:
-        # If eeg_input is an array, we default to Standby, otherwise use the string
-        quadrant = "STANDBY" if isinstance(eeg_input, (list, np.ndarray)) else eeg_input
-        return {"emotion": quadrant, "match": False, "confidence": 0.5}
-
-    # Handle EEG input whether it's passed as a string or raw probabilities
-    if isinstance(eeg_input, (list, np.ndarray)):
-        # If main.py passes raw probs, fallback to a safe quadrant (or use a threshold)
-        eeg_quadrant = "Relaxed / Calm" 
-    else:
-        eeg_quadrant = str(eeg_input)
-
-    # Extract maximum probability facial emotion
-    face_idx = np.argmax(face_probs)
-    face_emotion = emotions_list[face_idx].lower() 
-    face_quad_guess = FACE_TO_QUADRANT.get(face_emotion, "Relaxed / Calm")
+    eeg_label = str(eeg_input).strip().upper()
+    face_probs = np.array(face_probs).flatten()
     
-    # Normalise strings for comparison
-    eeg_clean = eeg_quadrant.lower().replace(" ", "")
-    face_clean = face_quad_guess.lower().replace(" ", "")
-    match = (eeg_clean == face_clean)
-    
-    reliability = CAMERA_RELIABILITY.get(face_emotion, 0.5)
-    
-    # ==========================================
-    # 1. DISSONANCE DETECTION (The "Fake" Check)
-    # ==========================================
-    # If the camera sees high-positivity but the brainwave shows low-valence
-    is_faking_happy = (face_emotion == "happy" and "sad" in eeg_quadrant.lower())
-    
+    if np.sum(face_probs) == 0:
+        return {"emotion": "STANDBY", "status": "Offline", "confidence": 0.0}
 
+    face_idx = int(np.argmax(face_probs))
+    face_conf = float(face_probs[face_idx])
+    face_label = emotions_list[face_idx].upper()
 
-    # ==========================================
-    # 2. FUSION LOGIC & OUTPUT
-    # ==========================================
-    if is_faking_happy:
-        final_emotion = "Social Smile / Bored"
-        confidence = 0.45  # Lower confidence because the sensory streams disagree
-        status = "Dissonance Detected"
-    elif match:
-        final_emotion = eeg_quadrant
-        confidence = 0.95  # High confidence due to cross-modal synchronization
+    # WEIGHTED CONFIDENCE (65/35 Split)
+    # EEG (Neural Truth) is given more weight than the Optical Mask
+    total_confidence = (0.65 * 0.90) + (0.35 * face_conf)
+
+    if "CALIB" in eeg_label:
+        return {"emotion": "CALIBRATING", "status": "EEG_BUSY", "confidence": total_confidence}
+
+    allowed_faces = EMOTION_MAP.get(eeg_label, ["NEUTRAL"])
+    
+    # ACCURACY GATE
+    # Dissonance is only triggered if face_conf > 0.65 (High Certainty)
+    if face_label in allowed_faces:
         status = "Synced"
+        final = eeg_label
     else:
-        # Conflict Resolution: Default to the highest reliability source
-        # If the camera is highly confident (> 60%), trust it. Otherwise, trust the brain.
-        final_emotion = face_quad_guess if reliability > 0.6 else eeg_quadrant
-        confidence = reliability
-        status = "Mixed Signals"
+        if face_conf > 0.65:
+            status = "Dissonance"
+            final = f"MASKED {eeg_label}"
+        else:
+            # If the camera is unsure, we trust the Brain (EEG)
+            status = "Synced"
+            final = eeg_label
 
     return {
-        "emotion": final_emotion,
+        "emotion": final,
         "status": status,
-        "confidence": confidence,
-        "is_fake": is_faking_happy
+        "confidence": round(total_confidence, 4),
+        "details": {"eeg": eeg_label, "face": face_label}
     }

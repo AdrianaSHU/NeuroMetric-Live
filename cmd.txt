@@ -1,0 +1,11 @@
+Comand for creating a tunnel between a laptop/PC and Raspberry Pi
+Type in windows terminal:
+
+ssh -L 8000:localhost:8000 pi@devbci.local
+
+After security warning, type "yes", and RPi password, then leave the terminal
+and the webapp will be functioning on the same address as RPi
+
+http://localhost:8000 
+
+pi@devbci:~/Desktop/FastAPI $ python3 -m app.main 

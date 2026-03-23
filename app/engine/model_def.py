@@ -1,75 +1,42 @@
 import torch
 import torch.nn as nn
 
+class SpatialAttention(nn.Module):
+    def __init__(self, num_channels):
+        super(SpatialAttention, self).__init__()
+        # Squeeze-and-Excitation: Learns which electrodes are most important
+        self.fc1 = nn.Linear(num_channels, num_channels // 2)
+        self.fc2 = nn.Linear(num_channels // 2, num_channels)
+        
+    def forward(self, x):
+        w = torch.mean(x, dim=2) 
+        w = torch.relu(self.fc1(w))
+        w = torch.sigmoid(self.fc2(w)).unsqueeze(2)
+        return x * w 
 
-
-class EEGNet(nn.Module):
-    """
-    EEGNet: A Compact Convolutional Neural Network for EEG-based Brain-Computer Interfaces.
-    Highly optimized for Edge AI computing (like the Raspberry Pi). It uses Depthwise 
-    and Separable Convolutions to drastically reduce the number of parameters while 
-    maximizing feature extraction from raw neuro-telemetry.
-    """
-    def __init__(self):
-        super(EEGNet, self).__init__()
+class SEED_SICNet8_Attention(nn.Module):
+    def __init__(self, num_channels=8):
+        super(SEED_SICNet8_Attention, self).__init__()
+        self.conv1 = nn.Conv1d(num_channels, 64, kernel_size=3, padding=1)
+        self.bn1 = nn.BatchNorm1d(64)
         
-        # ==========================================
-        # 1. TEMPORAL BLOCK (Bandpass Filter)
-        # ==========================================
-        # Acts as a set of digital bandpass filters. The kernel_size=(1, 32) slides 
-        # across the time axis to extract frequency-specific features (like Alpha/Beta waves) 
-        # independently for each channel before mixing them.
-        self.temporal = nn.Sequential(
-            nn.Conv2d(1, 16, kernel_size=(1, 32), padding=(0, 16), bias=False),
-            nn.BatchNorm2d(16)
-        )
+        self.conv2 = nn.Conv1d(num_channels, 64, kernel_size=5, padding=2)
+        self.bn2 = nn.BatchNorm1d(64)
         
-        # ==========================================
-        # 2. SPATIAL BLOCK (Electrode Topography)
-        # ==========================================
-        # Learns spatial patterns across the 8 EEG electrodes. 
-        # kernel_size=(8, 1) spans all 8 channels at a single point in time.
-        # 'groups=16' ensures it acts as a Depthwise Convolution, applying filters 
-        # to each temporal feature map independently.
-        self.spatial = nn.Sequential(
-            nn.Conv2d(16, 32, kernel_size=(8, 1), groups=16, bias=False),
-            nn.BatchNorm2d(32), 
-            nn.ELU(),  # Exponential Linear Unit handles negative signal dips better than ReLU
-            nn.AvgPool2d((1, 4)), 
-            nn.Dropout(0.3) # Regularization: Prevents the AI from memorizing a specific subject
-        )
+        self.attention = SpatialAttention(128) 
         
-        # ==========================================
-        # 3. SEPARABLE BLOCK (Feature Fusion)
-        # ==========================================
-        # Separable convolution (Depthwise + Pointwise) optimally merges the temporal 
-        # and spatial features together. This block reduces the computational load by 
-        # roughly 80% compared to a standard convolution layer.
-        self.separable = nn.Sequential(
-            nn.Conv2d(32, 32, kernel_size=(1, 16), padding=(0, 8), groups=32, bias=False),
-            nn.Conv2d(32, 32, kernel_size=1, bias=False),
-            nn.BatchNorm2d(32), 
-            nn.ELU(),
-            nn.AvgPool2d((1, 8)), 
-            nn.Dropout(0.3)
-        )
-        
-        # ==========================================
-        # 4. CLASSIFIER (Psychological Output)
-        # ==========================================
-        # Flattens the abstract 2D feature maps into a 1D array, then passes them 
-        # through dense layers to output the final 2 coordinates for Russell's Circumplex.
         self.classifier = nn.Sequential(
-            nn.Flatten(),
-            nn.Linear(32 * 1 * 4, 64),
+            nn.Linear(128, 64),
+            nn.LayerNorm(64),
             nn.ReLU(),
-            nn.Linear(64, 2)  # Output: [Valence_Logit, Arousal_Logit]
+            nn.Dropout(0.5),
+            nn.Linear(64, 4) # 0: Neutral, 1: Sad, 2: Fear, 3: Happy
         )
 
     def forward(self, x):
-        """
-        The Forward Pass. Pushes the raw tensor through the network blocks sequentially.
-        Input Shape: (Batch_Size, 1, Channels=8, Time_Samples=128)
-        Output Shape: (Batch_Size, 2)
-        """
-        return self.classifier(self.separable(self.spatial(self.temporal(x))))
+        x1 = torch.relu(self.bn1(self.conv1(x)))
+        x2 = torch.relu(self.bn2(self.conv2(x)))
+        x_fusion = torch.cat([x1, x2], dim=1) 
+        x_attended = self.attention(x_fusion)
+        x_pooled = torch.mean(x_attended, dim=2) 
+        return self.classifier(x_pooled)

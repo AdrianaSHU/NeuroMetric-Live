@@ -15,31 +15,36 @@
     </div>
 </div>
 
-<div id="calibration-guide" class="card border-info d-none mb-4 shadow-sm p-0 overflow-hidden">
-    <div class="card-header bg-info text-white fw-bold d-flex justify-content-between align-items-center border-0">
+<div id="calibration-guide" class="card border-info border-2 d-none mb-4 shadow-lg p-0 overflow-hidden">
+    <div class="card-header bg-info text-white fw-bold d-flex justify-content-between align-items-center border-0 py-2">
         <span><i class="bi bi-activity me-2"></i>BIOLOGICAL CALIBRATION IN PROGRESS</span>
         <button type="button" class="btn-close btn-close-white" onclick="CalibrationSystem.stop()"></button>
     </div>
-    <div class="card-body bg-white">
-        <div class="row align-items-center">
-            <div class="col-md-3 text-center border-end">
-                <img id="calib-image-display" src="https://placehold.co/300x300/f8f9fa/6c757d?text=FOCUS" 
-                     class="img-fluid rounded border shadow-sm" style="max-height: 140px; width: 100%; object-fit: cover;">
-            </div>
-            <div class="col-md-5">
-                <p class="small text-muted mb-2 fw-bold text-uppercase ls-1">Signal Integrity Protocol:</p>
-                <ul class="mb-0 small text-secondary list-unstyled">
+    
+    <div class="card-body bg-white p-4">
+        <div class="row align-items-center mb-4">
+            <div class="col-md-6 border-end pe-4">
+                <p class="text-muted mb-2 fw-bold text-uppercase ls-1 small">Signal Integrity Protocol:</p>
+                <ul class="mb-0 text-secondary list-unstyled" style="line-height: 1.6; font-size: 0.95rem;">
                     <li id="calib-status-text" class="text-info fw-bold mb-1"><i class="bi bi-chevron-right"></i> Keep face neutral</li>
                     <li><i class="bi bi-chevron-right"></i> Relax jaw (no clenching)</li>
                     <li><i class="bi bi-chevron-right"></i> Minimize blinking</li>
                     <li><i class="bi bi-chevron-right"></i> Focus on target image</li>
                 </ul>
             </div>
-            <div class="col-md-4 text-center">
-                <div class="h2 fw-bold text-info mb-0" id="calib-timer">WAIT</div>
-                <div class="progress mt-2" style="height: 10px; background-color: #e9ecef;">
+            
+            <div class="col-md-6 text-center ps-4">
+                <div class="h2 fw-bold text-info mb-2" id="calib-timer" style="letter-spacing: -0.5px;">WAIT</div>
+                <div class="progress mx-auto shadow-sm" style="height: 20px; background-color: #e9ecef; border-radius: 10px; max-width: 90%;">
                     <div id="calib-progress" class="progress-bar bg-info progress-bar-striped progress-bar-animated" style="width: 0%"></div>
                 </div>
+            </div>
+        </div>
+
+        <div class="row">
+            <div class="col-12 text-center">
+                <img id="calib-image-display" src="https://placehold.co/800x400/f8f9fa/6c757d?text=FOCUS" 
+                     class="img-fluid rounded border shadow" style="max-height: 450px; width: 100%; object-fit: cover;">
             </div>
         </div>
     </div>
@@ -48,7 +53,7 @@
 <div class="row g-4 mb-4">
     <div class="col-md-5">
         <div class="card h-100 position-relative shadow-sm p-0 border-0 overflow-hidden">
-            <div id="face-overlay" class="position-absolute w-100 h-100 top-0 start-0 d-flex flex-column align-items-center justify-content-center" 
+            <div id="face-overlay" class="position-absolute w-100 h-100 top-0 start-0 d-flex flex-column align-items-center justify-content-center bg-white" 
                  style="z-index: 10;">
                 <h4 class="cyan fw-bold text-uppercase blink">Searching...</h4>
                 <p class="small text-muted">Align face with camera sensor</p>
@@ -60,19 +65,19 @@
                 <button class="btn btn-sm btn-outline-cyan py-0 px-2 fw-bold x-small" onclick="CalibrationSystem.start()">CALIB</button>
             </div>
 
-            <div class="video-container">
-                <img src="/face_stream" alt="Camera Feed">
+            <div class="video-container" style="background: #000;">
+                <img src="/face_stream" alt="Camera Feed" class="w-100" style="object-fit: cover;">
             </div>
             <div class="mt-2 text-center pb-3">
-                <div id="face-val" class="value cyan">INIT...</div>
-                <div id="face-conf" class="conf">CONFIDENCE: --%</div>
+                <div id="face-val" class="value cyan fs-2 fw-bold">INIT...</div>
+                <div id="face-conf" class="conf small text-muted">CONFIDENCE: --%</div>
             </div>
         </div>
     </div>
 
     <div class="col-md-7">
         <div class="card h-100 position-relative shadow-sm p-0 border-0 overflow-hidden">
-            <div id="eeg-overlay" class="position-absolute w-100 h-100 top-0 start-0 d-flex flex-column align-items-center justify-content-center" 
+            <div id="eeg-overlay" class="position-absolute w-100 h-100 top-0 start-0 d-flex flex-column align-items-center justify-content-center bg-white" 
                  style="z-index: 10;">
                 <h4 class="purple fw-bold blink">OFFLINE</h4>
                 <p class="small text-muted">Check Cyton Dongle / Electrode Impedance</p>
@@ -80,7 +85,7 @@
 
             <div class="d-flex justify-content-between align-items-center p-2 bg-light border-bottom">
                 <span class="badge bg-white text-purple border x-small ls-1">
-                    BRAIN STATE: <span id="eeg-emotion-label" class="fw-bold">INIT...</span>
+                    BRAIN STATE: <span id="eeg-emotion-label" class="fw-bold fs-6">INIT...</span>
                 </span>
                 <span class="badge bg-white text-purple x-small border border-purple" id="eeg-heartbeat">SYNC</span>
                 <div class="btn-group">
@@ -103,7 +108,7 @@
                 <div id="metricsChart" style="width: 100%; height: 100%;"></div>
             </div>
 
-            <div class="p-2 bg-light rounded-bottom">
+            <div class="p-2 bg-light rounded-bottom border-top">
                 <div class="d-flex justify-content-around x-small fw-bold text-uppercase">
                     <span class="cyan">Valence: <span id="val-num">0.00</span></span>
                     <span class="purple">Arousal: <span id="aro-num">0%</span></span>
@@ -116,15 +121,24 @@
 
 <div class="row mb-4">
     <div class="col-12">
-        <div id="fusion-container" class="fusion-box shadow-sm border-start-purple" style="border-left-width: 6px;">
+        <div id="fusion-container" class="card shadow-sm border-0 border-start border-5 border-purple bg-white text-center py-4">
+            
             <div id="fusion-active-ui" class="d-none">
-                <h6 class="text-uppercase text-muted ls-1 x-small fw-bold">Affective Fusion Engine</h6>
-                <h1 id="fusion-val" class="display-4 fw-bold purple my-1">ANALYSING...</h1>
-                <div id="match-status" class="badge bg-light text-dark border px-3 py-2 mt-1">Cross-Referencing...</div>
-                <div class="mt-2"><span class="badge bg-white text-danger x-small border border-danger blink" id="fusion-heartbeat">SYNC</span></div>
+                <h6 class="text-uppercase text-muted ls-1 x-small fw-bold mb-1">Affective Fusion Engine</h6>
+                <h1 id="fusion-val" class="display-4 fw-bold purple my-2" style="letter-spacing: -1px;">ANALYSING...</h1>
+                
+                <div id="match-status" class="badge bg-light text-dark border px-4 py-2 mt-1 fs-6 shadow-sm rounded-pill">
+                    Cross-Referencing...
+                </div>
+                
+                <div class="mt-3">
+                    <span class="badge bg-white text-danger x-small border border-danger blink" id="fusion-heartbeat">SYNC</span>
+                </div>
             </div>
+
             <div id="fusion-waiting-ui" class="py-4">
-                <p class="text-muted mb-0 italic x-small text-uppercase ls-1">Awaiting dual-sensor synchronisation (EEG + Face)...</p>
+                <div class="spinner-grow text-purple spinner-grow-sm mb-3" role="status"></div>
+                <p class="text-muted mb-0 fst-italic x-small text-uppercase ls-1">Awaiting dual-sensor synchronisation (EEG + Face)...</p>
             </div>
         </div>
     </div>
@@ -133,29 +147,31 @@
 <div class="row mt-4 g-4">
     <div class="col-lg-5">
         <div class="card shadow-sm border-0 h-100 p-0 overflow-hidden">
-            <div class="card-header bg-light text-dark fw-bold x-small py-2 text-uppercase ls-1 border-0">
-                Subject Onboarding
+            <div class="card-header bg-light text-dark fw-bold x-small py-3 text-uppercase ls-1 border-0">
+                <i class="bi bi-person-plus me-1"></i> Subject Onboarding
             </div>
-            <div class="card-body bg-white">
-                <div class="row g-2 align-items-center">
-                    <div class="col-md-6">
-                        <label class="x-small fw-bold text-muted d-block uppercase">Alias</label>
-                        <input type="text" id="sub-nick" class="form-control form-control-sm border-light" placeholder="Nickname">
+            <div class="card-body bg-white p-4">
+                <div class="row g-3 align-items-center">
+                    <div class="col-md-5">
+                        <label class="x-small fw-bold text-muted d-block text-uppercase mb-1">Alias / Name</label>
+                        <input type="text" id="sub-nick" class="form-control form-control-sm border-secondary-subtle" placeholder="e.g., Subject 01">
                     </div>
                     <div class="col-md-3">
-                        <label class="x-small fw-bold text-muted d-block uppercase">Age</label>
-                        <input type="number" id="sub-age" class="form-control form-control-sm border-light" placeholder="Age" min="18">
+                        <label class="x-small fw-bold text-muted d-block text-uppercase mb-1">Age</label>
+                        <input type="number" id="sub-age" class="form-control form-control-sm border-secondary-subtle" placeholder="Age" min="18">
                     </div>
-                    <div class="col-md-3">
-                        <label class="x-small fw-bold text-muted d-block uppercase">Sex</label>
-                        <select id="sub-sex" class="form-select form-select-sm border-light">
-                            <option value="M">M</option>
-                            <option value="F">F</option>
-                            <option value="O">O</option>
+                    <div class="col-md-4">
+                        <label class="x-small fw-bold text-muted d-block text-uppercase mb-1">Sex</label>
+                        <select id="sub-sex" class="form-select form-select-sm border-secondary-subtle">
+                            <option value="M">Male (M)</option>
+                            <option value="F">Female (F)</option>
+                            <option value="O">Other (O)</option>
                         </select>
                     </div>
-                    <div class="col-12 mt-3">
-                        <button class="btn btn-cyan btn-sm w-100 py-2 fw-bold" onclick="addNewSubject()">REGISTER SUBJECT</button>
+                    <div class="col-12 mt-4">
+                        <button class="btn btn-cyan btn-sm w-100 py-2 fw-bold text-white shadow-sm" onclick="addNewSubject()">
+                            REGISTER SUBJECT
+                        </button>
                     </div>
                 </div>
             </div>
@@ -165,20 +181,21 @@
     <div class="col-lg-7">
         <div class="card shadow-sm border-0 h-100 p-0 overflow-hidden">
             <div class="card-header bg-light text-dark fw-bold x-small py-2 d-flex justify-content-between align-items-center border-0">
-                <span class="text-uppercase ls-1">Subject Vault</span>
-                <input type="text" id="subject-search" class="form-control form-control-sm w-50 border-light" placeholder="Search..." onkeyup="filterSubjects()">
+                <span class="text-uppercase ls-1"><i class="bi bi-database me-1"></i> Subject Vault</span>
+                <input type="text" id="subject-search" class="form-control form-control-sm w-50 border-secondary-subtle" placeholder="Search..." onkeyup="filterSubjects()">
             </div>
-            <div class="card-body p-0 bg-white" style="max-height: 200px; overflow-y: auto;">
-                <table class="table table-sm table-hover mb-0 x-small">
-                    <thead>
-                        <tr class="bg-light">
-                            <th class="border-0">UID</th>
-                            <th class="border-0">ALIAS</th>
-                            <th class="border-0">INFO</th>
-                            <th class="border-0 text-end">ACTIONS</th>
+            <div class="card-body p-0 bg-white" style="max-height: 250px; overflow-y: auto;">
+                <table class="table table-sm table-hover mb-0 x-small align-middle">
+                    <thead class="sticky-top bg-light">
+                        <tr>
+                            <th class="border-0 px-3 py-2 text-muted">UID</th>
+                            <th class="border-0 py-2 text-muted">ALIAS</th>
+                            <th class="border-0 py-2 text-muted">INFO</th>
+                            <th class="border-0 text-end px-3 py-2 text-muted">ACTIONS</th>
                         </tr>
                     </thead>
-                    <tbody id="subject-list-body"></tbody>
+                    <tbody id="subject-list-body">
+                        </tbody>
                 </table>
             </div>
         </div>

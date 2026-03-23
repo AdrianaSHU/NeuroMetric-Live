@@ -1,110 +1,119 @@
 import cv2
 import mediapipe as mp
 import numpy as np
+import threading
+import math
+import time
 
 class CameraSensor:
-    """
-    Edge-Optimized Optical Sensor Manager.
-    Handles real-time video capture and facial tracking on the Raspberry Pi.
-    Enforces 'Privacy by Design' by never saving video feeds to disk; 
-    frames are held in volatile RAM just long enough for inference and then destroyed.
-    """
     def __init__(self):
-        # 0 is the default index for the Pi Camera or primary USB Webcam
-        self.cap = cv2.VideoCapture(0)
+        self.cap = None
+        self._running = False
+        self._lock = threading.Lock()
+        self._current_frame = None
+        self.last_full_frame = None
         
-        # Optimization: Force a lower resolution (VGA) to drastically reduce 
-        # the CPU load and prevent thermal throttling on the Raspberry Pi.
-        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-        
-        # Initialize MediaPipe Face Detection
-        # We use 'FaceDetection' rather than 'FaceMesh' because it is significantly 
-        # lighter on the CPU and perfectly suited for basic bounding box extraction.
-        self.mp_face_detection = mp.solutions.face_detection
-        self.detector = self.mp_face_detection.FaceDetection(
-            model_selection=0, # 0 = Short-range model (best for subjects sitting < 2m from screen)
-            min_detection_confidence=0.5
-        )
-        
-        self.last_face_roi = None       
-        self.last_full_frame = None     
+        self.L_EYE = [362, 385, 387, 263, 373, 380]
+        self.R_EYE = [33, 160, 158, 133, 153, 144]
+        self.detector = None
 
     def start(self):
-        """Wakes up the camera hardware if it was put to sleep."""
-        if not self.cap.isOpened():
-            self.cap.open(0)
-
-    def get_face_roi(self, emotion_text="ANALYZING..."):
-        """
-        Grabs the latest frame, locates the face, draws the UI overlays,
-        and extracts the cropped Region of Interest (ROI) for the AI model.
-        """
-        ret, frame = self.cap.read()
-        if not ret: 
-            return None
-
-
-
-        # UX/UI Enhancement: Mirror the frame horizontally.
-        # This makes the dashboard video feed act like a mirror, which is much 
-        # more comfortable and intuitive for the research subject to look at.
-        frame = cv2.flip(frame, 1)
-        display_frame = frame.copy()
-        ih, iw, _ = frame.shape
-        
-        # MediaPipe requires RGB format, whereas OpenCV captures in BGR by default
-        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        
-        # Memory Optimization: Forcing contiguous memory allocation speeds up 
-        # MediaPipe's internal C++ processing significantly.
-        rgb_frame = np.ascontiguousarray(rgb_frame)
-        rgb_frame.flags.writeable = False 
-        
-        # Run the lightweight Face Detection
-        results = self.detector.process(rgb_frame)
-
-        if results.detections:
-            # Grab the highest-confidence face in the frame (index 0)
-            detection = results.detections[0]
-            bbox = detection.location_data.relative_bounding_box
+        try:
+            self.cap = cv2.VideoCapture(0)
+            self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
             
-            # Convert relative coordinates (0.0 - 1.0) to absolute pixel coordinates
-            x = int(bbox.xmin * iw)
-            y = int(bbox.ymin * ih)
-            w = int(bbox.width * iw)
-            h = int(bbox.height * ih)
+            if self.detector is None:
+                self.detector = mp.solutions.face_mesh.FaceMesh(
+                    max_num_faces=1, refine_landmarks=True, min_detection_confidence=0.6
+                )
             
-            # Padding Logic: The AI model needs to see a bit of the forehead and chin context.
-            # max(0, ...) and min(iw/ih, ...) strictly prevent array 'out of bounds' crashes.
-            pad = 20
-            x1, y1 = max(0, x - pad), max(0, y - pad)
-            x2, y2 = min(iw, x + w + pad), min(ih, y + h + pad)
+            self._running = True
+            threading.Thread(target=self._capture_loop, daemon=True).start()
+        except Exception as e:
+            print(f"[Hardware] Camera Start Error: {e}")
 
-            # Draw the Tracking Bounding Box (Cyberpunk UI Green)
-            box_color = (198, 218, 3) 
-            cv2.rectangle(display_frame, (x1, y1), (x2, y2), box_color, 2)
+    def _capture_loop(self):
+        while self._running and self.cap is not None:
+            ret, frame = self.cap.read()
+            if ret:
+                # The Selfie Mirror
+                frame = cv2.flip(frame, 1)
+                with self._lock: self._current_frame = frame
+            else:
+                time.sleep(0.01)
+
+    def get_processed_data(self, emotion_text="NEUTRAL"):
+        if self.detector is None or not self._running:
+            return None, 0.0
+
+        with self._lock:
+            if self._current_frame is None: return None, 0.0
+            frame = self._current_frame.copy()
+
+        try:
+            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            results = self.detector.process(rgb) 
             
-            # Draw the live AI Emotion Prediction slightly above the bounding box
-            cv2.putText(display_frame, emotion_text, (x1, max(20, y1 - 10)), 
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, box_color, 2)
+            ear = 0.0
+            face_roi = None
 
-            # Extract the final cropped image array to send to the TFLite FaceProcessor
-            face_crop = frame[y1:y2, x1:x2]
-            
-            if face_crop.size > 0:
-                self.last_face_roi = face_crop
-                self.last_full_frame = display_frame
-                return face_crop
+            if results.multi_face_landmarks:
+                lms = results.multi_face_landmarks[0].landmark
+                ih, iw, _ = frame.shape
+                
+                xs = [lm.x for lm in lms]; ys = [lm.y for lm in lms]
+                
+                # VISUAL UI BOX: Added a comfortable margin
+                ui_pad_w = int(iw * 0.05) # 5% width margin
+                ui_pad_h = int(ih * 0.08) # 8% height margin 
+                
+                x1_ui = max(0, int(min(xs)*iw) - ui_pad_w)
+                y1_ui = max(0, int(min(ys)*ih) - ui_pad_h)
+                x2_ui = min(iw, int(max(xs)*iw) + ui_pad_w)
+                y2_ui = min(ih, int(max(ys)*ih) + ui_pad_h)
+                
+                color = (198, 218, 3) 
+                cv2.rectangle(frame, (x1_ui, y1_ui), (x2_ui, y2_ui), color, 2)
+                cv2.rectangle(frame, (x1_ui, y1_ui - 25), (x1_ui + 100, y1_ui), color, -1)
+                cv2.putText(frame, emotion_text, (x1_ui + 5, y1_ui - 7), 
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
 
-        # If no face is detected, we still save the display frame so the UI 
-        # doesn't freeze, but we return None for the ROI so the AI pauses.
-        self.last_full_frame = display_frame
-        self.last_face_roi = None
-        return None
+                # AI CROP BOX: Padded (For the AI's eyes)
+                # extracting the large 15%/25% box
+                ai_pad_w = int(iw * 0.15) 
+                ai_pad_h = int(ih * 0.25) 
+                
+                x1_ai = max(0, int(min(xs)*iw) - ai_pad_w)
+                y1_ai = max(0, int(min(ys)*ih) - ai_pad_h)
+                x2_ai = min(iw, int(max(xs)*iw) + ai_pad_w)
+                y2_ai = min(ih, int(max(ys)*ih) + ai_pad_h)
+
+                # Feed the LARGER box to the neural network
+                face_roi = frame[y1_ai:y2_ai, x1_ai:x2_ai]
+
+                l_ear = self._calc_ear(lms, self.L_EYE, iw, ih)
+                r_ear = self._calc_ear(lms, self.R_EYE, iw, ih)
+                ear = (l_ear + r_ear) / 2.0
+
+            self.last_full_frame = frame
+            return face_roi, ear
+        except Exception:
+            return None, 0.0
 
     def stop(self):
-        """Safely releases the hardware resources."""
-        if self.cap.isOpened():
+        self._running = False
+        if self.cap is not None:
             self.cap.release()
-        self.detector.close()
+            self.cap = None
+        if self.detector is not None:
+            try:
+                self.detector.close()
+            except: pass
+            self.detector = None
+
+    def _calc_ear(self, landmarks, indices, iw, ih):
+        coords = [(landmarks[i].x * iw, landmarks[i].y * ih) for i in indices]
+        v1 = math.dist(coords[1], coords[5])
+        v2 = math.dist(coords[2], coords[4])
+        h = math.dist(coords[0], coords[3])
+        return (v1 + v2) / (2.0 * h)

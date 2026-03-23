@@ -2,7 +2,7 @@ from pydantic import BaseModel, ConfigDict
 from datetime import datetime
 from typing import Optional
 
-# --- Authentication Schemas ---
+# Authentication Schemas 
 
 class LoginRequest(BaseModel):
     username: str
@@ -14,23 +14,19 @@ class Token(BaseModel):
     access_token: str
     token_type: str
 
-# --- User & Research Subject Schemas ---
+# User & Research Subject Schemas 
 
 class UserResponse(BaseModel):
     id: int
-    username: str  # Usually a pseudonymized Subject ID (e.g., S001)
+    username: str
+    nickname: Optional[str] = None
     role: str
     is_active: bool
+    learned_bias: Optional[str] = None # For the Adaptive ML tracking
     created_at: datetime
     model_config = ConfigDict(from_attributes=True)
 
-# --- BCI Stimuli & Calibration Schemas ---
-
-class EEGImageResponse(BaseModel):
-    id: int
-    phase: str  # Neutral, Focus, or Relax
-    image_path: str
-    model_config = ConfigDict(from_attributes=True)
+# BCI Stimuli & Calibration Schemas 
 
 class FaceCalibrationSchema(BaseModel):
     anger: float = 0.0
