@@ -22,10 +22,10 @@ This repository contains the full APA 7th Edition reference list supporting the 
 
 * Xia, K., Duch, W., Sun, Y., Xu, K., Fang, W., Luo, H., Zhang, Y., Sang, D., Xu, X., Wang, F.-Y., & Wu, D. (2023). Privacy-preserving brain–computer interfaces: A systematic review. *IEEE Transactions on Computational Social Systems*, *10*(5), 2312–2324. <https://doi.org/10.1109/TCSS.2022.3184818>
 
-* Zheng, W. L., Liu, W., Lu, Y., Lu, B. L., & Cichocki, A. (2018). EmotionMeter: A multimodal framework for recognizing human emotions. *IEEE Transactions on Cybernetics*, *49*(3), 1110–1122. <https://doi.org/10.1109/TCYB.2018.2797176>
-
 * Zhang, J., Yin, Z., Chen, P., & Nichele, S. (2020). Emotion recognition using multi-modal data and machine learning techniques: A tutorial and review. *Information Fusion*, *59*, 103–126. <https://doi.org/10.1016/j.inffus.2020.01.011>
 
-  
+* Zheng, W. L., Liu, W., Lu, Y., Lu, B. L., & Cichocki, A. (2018). EmotionMeter: A multimodal framework for recognizing human emotions. *IEEE Transactions on Cybernetics*, *49*(3), 1110–1122. <https://doi.org/10.1109/TCYB.2018.2797176>
+
+
 ---
 *End of Document*
