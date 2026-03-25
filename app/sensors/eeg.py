@@ -43,7 +43,7 @@ class EEGSensor:
                 return data
         except Exception:
             self.is_connected = False
-        return None
+        return None 
 
     def stop(self):
         if self.board and self.is_connected:

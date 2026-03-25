@@ -114,7 +114,8 @@ def sensor_loop():
             # Brainwave Inference
             if is_eeg_valid:
                 eeg_emotion, eeg_probs_list = eeg_engine.predict(raw_eeg)
-                eeg_conf = 0.85 
+                # Get actual confidence from the Softmax output
+                eeg_conf = float(max(eeg_probs_list))
                 psych_metrics = eeg_engine.get_psych_metrics()
 
             # Facial Expression Inference
@@ -131,10 +132,13 @@ def sensor_loop():
 
             # Multimodal Fusion
             if is_eeg_valid and is_face_valid:
-                # This function now handles the "Synced" vs "Dissonance" status strings
-                fusion_result = compute_multimodal_fusion(eeg_emotion, face_probs, config.EMOTIONS, user_profile)
-            else:
-                fusion_result = {"emotion": "STANDBY", "status": "WAITING", "is_fake": False, "confidence": 0.0}
+                fusion_result = compute_multimodal_fusion(
+                    eeg_emotion, 
+                    eeg_conf, 
+                    face_probs, 
+                    config.EMOTIONS, 
+                    user_profile
+                )
 
             # Update Global State 
             latest_data.update({
