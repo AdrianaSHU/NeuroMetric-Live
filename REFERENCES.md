@@ -12,7 +12,7 @@ This repository contains the full APA 7th Edition reference list supporting the 
 
 * Jahnke, N., Rohde, M., & Kraus, T. (2025). Edge computing for digital sovereignty in the data economy. *Springer Nature Switzerland*. <https://doi.org/10.1007/978-3-031-69994-8_15>
 
-* Li, J. W., Lin, D., Che, Y., & Lv, J. (2023). An innovative EEG-based emotion recognition using a single channel-specific feature from the brain rhythm code method. *Frontiers in Neuroscience*, *17*, Article 1221512. <https://doi.org/10.3389/fnins.2023.1221512>
+* Jiang, X., Bian, G. B., & Tian, Z. (2019). Removal of artifacts from EEG signals: A review. Sensors, 19(5), 987.  <https://doi.org//10.3390/s19050987>
 
 * Mollahosseini, A., Hasani, B., & Mahoor, M. H. (2017). AffectNet: A database for facial expression, valence, and arousal computing in the wild. *IEEE Transactions on Affective Computing*, *10*(1), 18–31. <https://doi.org/10.1109/TAFFC.2017.2740923>
 
