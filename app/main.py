@@ -17,7 +17,7 @@ from fastapi.templating import Jinja2Templates
 from contextlib import asynccontextmanager
 from jose import jwt, JWTError
 
-# Internal Modules
+# Internal modules
 from app.core import database, security, schemas, config
 from app.sensors.eeg import EEGSensor
 from app.sensors.camera import CameraSensor
@@ -25,8 +25,7 @@ from app.engine.eeg_processor import EEGProcessor
 from app.engine.face_processor import FaceProcessor
 from app.engine.fusion import compute_multimodal_fusion
 
-# GLOBAL HARDWARE & AI INSTANCES
-
+# Global hardware and AI instances
 eeg_hw = EEGSensor(serial_port=config.EEG_PORT)
 cam_hw = CameraSensor()
 _isnan = math.isnan
@@ -35,7 +34,7 @@ _isinf = math.isinf
 eeg_engine = EEGProcessor(model_path=config.EEG_MODEL_PATH, require_calibration=True)
 face_engine = FaceProcessor(model_path=config.FACE_MODEL_PATH)
 
-# Real-time state (Zero-Trust Data Source)
+# Real-time state (secure data source)
 latest_data = {
     "session": {"subject_id": "STANDBY", "nickname": ""},
     "eeg": {
@@ -52,10 +51,11 @@ latest_data = {
 session_logs = []
 user_profile = None
 
-# Global Label starts as clean text
+# Global label starts as clean text
 last_label = "NEUTRAL"
 active_csv_filename = None
 
+# Load user profile if it exists
 if os.path.exists("user_profile.json"):
     try:
         with open("user_profile.json", "r") as f:
@@ -70,7 +70,7 @@ def sanitize_float(val):
     except: return 0.0
 
 def gen_face_stream():
-    """Yields continuous MJPEG frames securely to the authenticated dashboard."""
+    """Sends video frames securely to the dashboard."""
     while True:
         frame = cam_hw.last_full_frame 
         if frame is not None:
@@ -82,7 +82,6 @@ def gen_face_stream():
             _, buffer = cv2.imencode('.jpg', placeholder)
             yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + buffer.tobytes() + b'\r\n')
         time.sleep(0.03)
-
 
 def sensor_loop():
     global latest_data, session_logs, last_label, active_csv_filename
@@ -97,10 +96,10 @@ def sensor_loop():
     
     while True:
         try:
-            # Hardware Polling
+            # Check hardware
             raw_eeg = eeg_hw.get_raw_data(250) 
             
-            # Request facial data (Eye Aspect Ratio is calculated but no longer used for status)
+            # Get facial data
             face_roi, ear_score = cam_hw.get_processed_data(emotion_text=last_label) 
             
             is_eeg_valid = raw_eeg is not None and raw_eeg.shape[1] > 0
@@ -111,26 +110,33 @@ def sensor_loop():
             face_probs = np.zeros(8)
             psych_metrics = {"valence": 0.0, "arousal": 0.0, "stress": 0.0}
 
-            # Brainwave Inference
+            # Brainwave analysis
             if is_eeg_valid:
                 eeg_emotion, eeg_probs_list = eeg_engine.predict(raw_eeg)
-                # Get actual confidence from the Softmax output
                 eeg_conf = float(max(eeg_probs_list))
                 psych_metrics = eeg_engine.get_psych_metrics()
 
-            # Facial Expression Inference
+            # Facial expression analysis
             if is_face_valid:
                 face_probs = face_engine.predict(face_roi)
                 face_idx = np.argmax(face_probs)
                 
-                # Fetch raw float for frontend JavaScript
+                # Get raw number for the frontend
                 face_conf_val = sanitize_float(face_probs[face_idx])
                 face_emotion = config.EMOTIONS[face_idx].upper()
                 
-                # Update visual label for the green box on next frame
+                # Update the label for the next video frame
                 last_label = face_emotion
 
-            # Multimodal Fusion
+            # Combine sensor data (Fallback if sensors are not ready)
+            fusion_result = {
+                "emotion": "STANDBY", 
+                "status": "Awaiting Sensors", 
+                "confidence": 0.0, 
+                "match": True, 
+                "is_fake": False
+            }
+
             if is_eeg_valid and is_face_valid:
                 fusion_result = compute_multimodal_fusion(
                     eeg_emotion, 
@@ -140,7 +146,7 @@ def sensor_loop():
                     user_profile
                 )
 
-            # Update Global State 
+            # Update global state 
             latest_data.update({
                 "eeg": {
                     "emotion": eeg_emotion, 
@@ -157,18 +163,17 @@ def sensor_loop():
                 "fusion": fusion_result
             })
 
-            # --- 6. APPEND-ON-THE-FLY CSV LOGGING ---
+            # Save data to CSV file
             current_time = time.time()
             
-            # Check if exactly 2.0 seconds have passed since the last save
+            # Check if 2 seconds have passed since the last save
             if active_csv_filename and (current_time - last_log_time >= 2.0) and is_eeg_valid and is_face_valid:
                 
-                # Reset the timer immediately
+                # Reset the timer
                 last_log_time = current_time 
-                
                 conf_val = fusion_result.get("confidence", 0.0)
 
-                # Auto-save straight to the PC disk
+                # Save directly to disk
                 with open(active_csv_filename, mode='a', newline='') as f:
                     writer = csv.writer(f)
                     writer.writerow([
@@ -183,7 +188,7 @@ def sensor_loop():
                         f"{psych_metrics.get('stress', 0.0):.2f}"
                     ])
 
-                # Keep the UI "Review" screen updated
+                # Update the user interface review screen
                 log_entry = {
                     "time": datetime.now().strftime("%H:%M:%S"),
                     "fusion": fusion_result["emotion"],
@@ -200,7 +205,7 @@ def sensor_loop():
             print(f"Worker Loop Error: {e}")
         time.sleep(0.03)
 
-# FASTAPI SERVER SETUP
+# FastAPI server setup
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -266,10 +271,10 @@ async def set_active(sid: str, admin: dict = Depends(security.get_current_admin)
     # Update active subject
     latest_data["session"]["subject_id"] = sid
     
-    # Clear the Live UI Review screen
+    # Clear the live review screen
     session_logs.clear()
     
-    # Remove the old session files for this specific subject
+    # Remove old session files for this subject
     os.makedirs("logs", exist_ok=True)
     old_files = glob.glob(f"logs/BCI_Session_{sid}_*.csv")
     for f in old_files:
@@ -278,7 +283,7 @@ async def set_active(sid: str, admin: dict = Depends(security.get_current_admin)
         except Exception as e:
             print(f"Failed to delete old log: {e}")
 
-    # Create a fresh file for the new session and write the headers
+    # Create a new file for the session and write headers
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     active_csv_filename = f"logs/BCI_Session_{sid}_{timestamp}.csv"
     
@@ -415,7 +420,7 @@ async def get_history(admin: dict = Depends(security.get_current_admin)):
 @app.get("/face_stream")
 async def face_stream(token: str = Query(None)):
     if not token:
-        raise HTTPException(status_code=401, detail="Stream unauthorized")
+        raise HTTPException(status_code=401, detail="Stream unauthorised")
     try:
         payload = jwt.decode(token, security.JWT_SECRET_KEY, algorithms=[security.ALGORITHM])
         if payload.get("role") != "superuser":
@@ -431,31 +436,30 @@ async def export_csv(admin: dict = Depends(security.get_current_admin)):
     
     current_sid = latest_data["session"]["subject_id"]
     
-    # Ensure a subject is actually selected
+    # Ensure a subject is selected
     if current_sid == "STANDBY":
         raise HTTPException(status_code=400, detail="No active subject selected.")
         
     target_file = None
     
-    # Is there a session currently running?
+    # Check if a session is running
     if active_csv_filename and os.path.exists(active_csv_filename):
         target_file = active_csv_filename
-    # If the session was stopped, find the timestamped file left in the folder
+    # If stopped, find the last saved file
     else:
         list_of_files = glob.glob(f"logs/BCI_Session_{current_sid}_*.csv")
         if list_of_files:
-            # Grab the one file that exists for this subject
             target_file = max(list_of_files, key=os.path.getctime)
             
-    # Check if a file was successfully found
+    # Check if a file was found
     if not target_file:
         raise HTTPException(status_code=404, detail=f"No session data found for subject {current_sid}.")
         
-    # Read the physical file from the hard drive
+    # Read the file from the hard drive
     with open(target_file, mode="rb") as f:
         content = f.read()
         
-    # Send it securely to the JavaScript download function
+    # Send to the frontend for download
     response = Response(content=content, media_type="text/csv")
     response.headers["Content-Disposition"] = f"attachment; filename={os.path.basename(target_file)}"
     return response
