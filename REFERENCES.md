@@ -1,4 +1,4 @@
-# NeuroMetric-Live: Complete Bibliography
+# NeuroMetric-Live: Complete Bibliography for Poster
 
 This repository contains the full APA 7th Edition reference list supporting the multimodal BCI edge computing architecture presented on the poster.
 
